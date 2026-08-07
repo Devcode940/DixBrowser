@@ -1,0 +1,47 @@
+--- app/src/main/java/com/example/ui/ExpertiseFeaturesComponents.kt
++++ app/src/main/java/com/example/ui/ExpertiseFeaturesComponents.kt
+@@ -823,6 +823,8 @@
+     var clearCookies by remember { mutableStateOf(true) }
+     var clearPasswords by remember { mutableStateOf(false) }
+     val context = LocalContext.current
++    var timeRangeExpanded by remember { mutableStateOf(false) }
++    var selectedTimeRange by remember { mutableStateOf("Last 24 hours") }
++    val timeRanges = listOf("Last hour", "Last 24 hours", "Last 7 days", "Last 4 weeks", "All time")
+ 
+     ModalBottomSheet(
+         onDismissRequest = onDismiss,
+@@ -896,6 +898,34 @@
+             title = { Text("Clear Browsing Data", color = Color.White, fontWeight = FontWeight.Bold) },
+             text = {
+                 Column {
++                    Row(
++                        modifier = Modifier
++                            .fillMaxWidth()
++                            .clickable { timeRangeExpanded = true }
++                            .padding(vertical = 8.dp),
++                        horizontalArrangement = Arrangement.SpaceBetween,
++                        verticalAlignment = Alignment.CenterVertically
++                    ) {
++                        Text("Time range:", color = Color.White)
++                        Text(selectedTimeRange, color = Color(0xFF89B4FA), fontWeight = FontWeight.Bold)
++                        
++                        androidx.compose.material3.DropdownMenu(
++                            expanded = timeRangeExpanded,
++                            onDismissRequest = { timeRangeExpanded = false }
++                        ) {
++                            timeRanges.forEach { range ->
++                                androidx.compose.material3.DropdownMenuItem(
++                                    text = { Text(range) },
++                                    onClick = {
++                                        selectedTimeRange = range
++                                        timeRangeExpanded = false
++                                    }
++                                )
++                            }
++                        }
++                    }
++                    Spacer(modifier = Modifier.height(16.dp))
++                    
+                     Row(verticalAlignment = Alignment.CenterVertically) {
+                         Checkbox(checked = clearHistory, onCheckedChange = { clearHistory = it })
+                         Text("Browsing History", color = Color.White)

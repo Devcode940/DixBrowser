@@ -1,0 +1,30 @@
+--- app/src/main/java/com/example/BrowserScreen.kt
++++ app/src/main/java/com/example/BrowserScreen.kt
+@@ -586,6 +586,11 @@
+                                                         )
+                                                     }
+                                                 }
++                                                
++                                                @android.webkit.JavascriptInterface
++                                                fun requestAutoFill(domain: String) {
++                                                    // to be implemented
++                                                }
+                                             }, "PasswordAutoFillBridge")
+ 
+                                             setDownloadListener { url, _, contentDisposition, mimetype, _ ->
+@@ -638,6 +643,15 @@
+                                                                     var f = forms[i];
+                                                                     if (!f.__passObserved) {
+                                                                         f.__passObserved = true;
++                                                                        var inputs = f.querySelectorAll('input');
++                                                                        for(var j=0; j<inputs.length; j++) {
++                                                                            inputs[j].addEventListener('focus', function() {
++                                                                               if (this.type === 'password' || this.type === 'text' || this.type === 'email' || this.name.toLowerCase().includes('user')) {
++                                                                                    if (window.PasswordAutoFillBridge) {
++                                                                                        window.PasswordAutoFillBridge.requestAutoFill(window.location.hostname);
++                                                                                    }
++                                                                               }
++                                                                            });
++                                                                        }
+                                                                         f.addEventListener('submit', function() {
+                                                                             try {

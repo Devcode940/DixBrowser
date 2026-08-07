@@ -1,0 +1,6 @@
+{
+  "name": "Dix Browser",
+  "description": "A privacy-focused, lightweight alternative for daily web browsing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
