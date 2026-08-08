@@ -1,11 +1,13 @@
 package com.example.security
 
-import android.webkit.CookieManager
 import android.webkit.WebView
 
 /**
- * Owns the privacy boundary for an incognito session. Nothing from this object
- * is persisted to Room/DataStore. Call clear() when the private session ends.
+ * Lifecycle helper for a private WebView session.
+ *
+ * IMPORTANT: true cookie/storage isolation requires the WebView to run in a
+ * dedicated process/data directory. This class only owns WebView cleanup; it
+ * deliberately does not clear global CookieManager/WebStorage state.
  */
 class PrivateBrowsingSession {
     private val webViews = LinkedHashSet<WebView>()
@@ -25,22 +27,15 @@ class PrivateBrowsingSession {
     fun clear() {
         if (closed) return
         closed = true
-
         webViews.forEach { webView ->
             runCatching {
                 webView.stopLoading()
+                webView.loadUrl("about:blank")
                 webView.clearHistory()
-                webView.clearCache(true)
                 webView.clearFormData()
                 webView.clearSslPreferences()
-                webView.loadUrl("about:blank")
             }
         }
-
-        // WebStorage is process-global; deleting it would also erase normal
-        // browsing data. Only session cookies are removed here.
-        runCatching { CookieManager.getInstance().removeSessionCookies(null) }
-        runCatching { CookieManager.getInstance().flush() }
         webViews.clear()
     }
 }
