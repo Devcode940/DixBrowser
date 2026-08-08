@@ -1,7 +1,6 @@
 package com.example.security
 
 import android.webkit.CookieManager
-import android.webkit.WebStorage
 import android.webkit.WebView
 
 /**
@@ -38,9 +37,10 @@ class PrivateBrowsingSession {
             }
         }
 
+        // WebStorage is process-global; deleting it would also erase normal
+        // browsing data. Only session cookies are removed here.
         runCatching { CookieManager.getInstance().removeSessionCookies(null) }
         runCatching { CookieManager.getInstance().flush() }
-        runCatching { WebStorage.getInstance().deleteAllData() }
         webViews.clear()
     }
 }
