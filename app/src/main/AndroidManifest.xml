@@ -15,6 +15,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication"
         tools:replace="android:allowBackup,android:fullBackupContent,android:usesCleartextTraffic">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -25,6 +26,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            WHY: Android WebView storage is process-scoped when a data-directory
+            suffix is used. Keeping private browsing in its own process prevents
+            Chromium cookies/storage/cache from sharing the normal profile.
+        -->
+        <activity
+            android:name=".privatebrowser.PrivateBrowserActivity"
+            android:exported="false"
+            android:process=":private"
+            android:excludeFromRecents="false"
+            android:launchMode="singleTop"
+            android:label="Private Browser"
+            android:theme="@style/Theme.MyApplication" />
     </application>
 
 </manifest>
