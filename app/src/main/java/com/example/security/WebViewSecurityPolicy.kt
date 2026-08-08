@@ -10,6 +10,8 @@ import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
+import java.util.Collections
+import java.util.WeakHashMap
 
 /**
  * Central security policy for all DixBrowser WebViews.
@@ -22,6 +24,7 @@ object WebViewSecurityPolicy {
     private val blockedSchemes = setOf(
         "file", "content", "data", "javascript", "vbscript", "about"
     )
+    private val destroyedWebViews = Collections.newSetFromMap(WeakHashMap<WebView, Boolean>())
 
     /** Applies the minimum secure WebView configuration. */
     fun configure(
@@ -44,8 +47,6 @@ object WebViewSecurityPolicy {
         settings.setSupportMultipleWindows(false)
         settings.javaScriptCanOpenWindowsAutomatically = false
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        // WHY: Private tabs should avoid persistent HTTP cache state while normal
-        // tabs retain Chromium's cache for performance.
         settings.cacheMode = if (incognito) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
         settings.setGeolocationEnabled(false)
         settings.displayZoomControls = false
@@ -63,9 +64,8 @@ object WebViewSecurityPolicy {
         }
 
         if (incognito) {
-            // WHY: Remove any state that could have been created before this
-            // WebView was attached to the private session. This never touches the
-            // normal profile because the private process owns a separate data dir.
+            // WHY: Remove state created before this WebView was attached to the
+            // private session. The private process owns a separate data directory.
             webView.clearHistory()
             webView.clearCache(true)
             webView.clearFormData()
@@ -88,11 +88,7 @@ object WebViewSecurityPolicy {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest
-            ): Boolean {
-                // WHY: Returning true for unsafe URLs prevents WebView from
-                // navigating to file/content/javascript/custom-scheme targets.
-                return !isSafeNavigation(request.url, httpsOnly)
-            }
+            ): Boolean = !isSafeNavigation(request.url, httpsOnly)
 
             @RequiresApi(Build.VERSION_CODES.O_MR1)
             override fun onSafeBrowsingHit(
@@ -108,8 +104,7 @@ object WebViewSecurityPolicy {
 
     /** Clears all Chromium state owned by the dedicated private process. */
     fun clearPrivateProfile() {
-        // WHY: This runs only inside :private, so it cannot erase the normal
-        // browser profile.
+        // WHY: This runs only inside :private, so it cannot erase the normal profile.
         runCatching { CookieManager.getInstance().removeAllCookies(null) }
         runCatching { CookieManager.getInstance().flush() }
         runCatching { WebStorage.getInstance().deleteAllData() }
@@ -117,15 +112,20 @@ object WebViewSecurityPolicy {
 
     /** Releases a WebView without destroying the normal browser HTTP cache. */
     fun destroy(webView: WebView) {
-        // WHY: Clearing cache on every normal tab close defeats browser caching
-        // and can cause severe I/O and performance regressions.
-        webView.stopLoading()
-        webView.loadUrl("about:blank")
-        webView.clearHistory()
-        webView.clearFormData()
-        webView.removeAllViews()
-        webView.webChromeClient = null
-        webView.webViewClient = null
-        webView.destroy()
+        // WHY: Compose disposal and Activity teardown can both attempt cleanup;
+        // making destruction idempotent prevents double-destroy renderer crashes.
+        synchronized(destroyedWebViews) {
+            if (!destroyedWebViews.add(webView)) return
+        }
+        runCatching {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.clearHistory()
+            webView.clearFormData()
+            webView.removeAllViews()
+            webView.webChromeClient = null
+            webView.webViewClient = null
+            webView.destroy()
+        }
     }
 }
