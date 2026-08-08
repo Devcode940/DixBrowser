@@ -5,9 +5,8 @@ import android.webkit.WebView
 /**
  * Lifecycle helper for a private WebView session.
  *
- * IMPORTANT: true cookie/storage isolation requires the WebView to run in a
- * dedicated process/data directory. This class only owns WebView cleanup; it
- * deliberately does not clear global CookieManager/WebStorage state.
+ * WHY: The Activity runs in a dedicated process/data directory, so clearing
+ * the profile at session end does not touch normal browser storage.
  */
 class PrivateBrowsingSession {
     private val webViews = LinkedHashSet<WebView>()
@@ -37,5 +36,6 @@ class PrivateBrowsingSession {
             }
         }
         webViews.clear()
+        WebViewSecurityPolicy.clearPrivateProfile()
     }
 }
