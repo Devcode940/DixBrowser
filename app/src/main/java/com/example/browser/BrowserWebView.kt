@@ -4,6 +4,8 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -18,33 +20,46 @@ fun BrowserWebView(
     onDisposed: () -> Unit = {}
 ) {
     val webViewHolder = remember(tab.id) { WebViewHolder() }
+    val rendererGeneration = remember(tab.id) { mutableIntStateOf(0) }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            WebView(context).also { webView ->
-                webView.layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
+    key(tab.id, rendererGeneration.intValue) {
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                WebView(context).also { webView ->
+                    webView.layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    webViewHolder.webView = webView
+                    controller.configure(
+                        webView = webView,
+                        incognito = tab.isPrivate,
+                        onRendererGone = {
+                            // WHY: Android forbids reusing a WebView after its
+                            // renderer dies. Changing the key forces a fresh instance.
+                            webViewHolder.webView = null
+                            rendererGeneration.intValue++
+                            onDisposed()
+                        }
+                    )
+                    onCreated(webView)
+                }
+            },
+            update = { webView ->
                 webViewHolder.webView = webView
-                controller.configure(webView, tab.isPrivate)
-                onCreated(webView)
+                if (webView.url != tab.url && tab.url.isNotBlank() && tab.url != "about:blank") {
+                    webView.loadUrl(tab.url)
+                }
             }
-        },
-        update = { webView ->
-            webViewHolder.webView = webView
-            if (webView.url != tab.url && tab.url.isNotBlank() && tab.url != "about:blank") {
-                webView.loadUrl(tab.url)
-            }
-        }
-    )
+        )
 
-    DisposableEffect(tab.id) {
-        onDispose {
-            webViewHolder.webView?.let(controller::destroy)
-            webViewHolder.webView = null
-            onDisposed()
+        DisposableEffect(Unit) {
+            onDispose {
+                webViewHolder.webView?.let(controller::destroy)
+                webViewHolder.webView = null
+                onDisposed()
+            }
         }
     }
 }
