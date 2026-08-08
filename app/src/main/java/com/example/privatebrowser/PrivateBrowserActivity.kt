@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -37,6 +38,10 @@ class PrivateBrowserActivity : ComponentActivity() {
         }
         PrivateWebViewProcess.initialize()
         super.onCreate(savedInstanceState)
+
+        // WHY: Prevent private page content from appearing in screenshots,
+        // screen recordings, and recent-task snapshots.
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         val initialUrl = intent.getStringExtra(EXTRA_URL)
             ?.let(::normalizeUrl)
