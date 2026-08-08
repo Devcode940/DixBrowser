@@ -22,7 +22,7 @@ class PasswordVault(
     }
 
     /** Saves a credential only while the vault is unlocked. */
-    fun save(
+    suspend fun save(
         siteTitle: String,
         domain: String,
         username: String,
