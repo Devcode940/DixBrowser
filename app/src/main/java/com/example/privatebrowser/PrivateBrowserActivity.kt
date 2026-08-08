@@ -3,6 +3,7 @@ package com.example.privatebrowser
 import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.view.ViewGroup
@@ -16,6 +17,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -24,18 +26,19 @@ import com.example.security.PrivateWebViewProcess
 import com.example.security.WebViewSecurityPolicy
 import java.util.UUID
 
-/**
- * Dedicated private-browsing Activity.
- *
- * This Activity is declared with process=":private". On Android 9+, the
- * process receives its own WebView data-directory suffix before WebView is
- * instantiated, preventing normal and private WebView storage from sharing
- * the same Chromium profile.
- */
+/** Dedicated private-browsing Activity running in the :private process. */
 class PrivateBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        PrivateWebViewProcess.initialize()
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            // WHY: Android 8 and older cannot isolate Chromium data directories.
+            // Failing closed is safer than presenting a false private mode.
+            finish()
+            return
+        }
+
+        PrivateWebViewProcess.initialize()
 
         val initialUrl = intent.getStringExtra(EXTRA_URL)
             ?.takeIf(::isHttpUrl)
@@ -50,17 +53,10 @@ class PrivateBrowserActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        // AndroidView owns the WebView and invokes its disposal callback.
-        super.onDestroy()
-    }
-
     @SuppressLint("SetJavaScriptEnabled")
-    @androidx.compose.runtime.Composable
+    @Composable
     private fun PrivateWebView(initialUrl: String) {
-        val controller = remember {
-            PrivateBrowserController(applicationContext)
-        }
+        val controller = remember { PrivateBrowserController(applicationContext) }
 
         AndroidView(
             factory = { context ->
@@ -81,24 +77,13 @@ class PrivateBrowserActivity : ComponentActivity() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView,
                             request: WebResourceRequest
-                        ): Boolean {
-                            // WHY: Only HTTP(S) navigation stays inside the private
-                            // browser. Dangerous/custom schemes are rejected.
-                            return !isHttpUrl(request.url.toString())
-                        }
+                        ): Boolean = !isHttpUrl(request.url.toString())
                     }
 
                     webChromeClient = WebChromeClient()
-
                     setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                        controller.enqueueDownload(
-                            url = url,
-                            userAgent = userAgent,
-                            contentDisposition = contentDisposition,
-                            mimeType = mimeType
-                        )
+                        controller.enqueueDownload(url, userAgent, contentDisposition, mimeType)
                     }
-
                     loadUrl(initialUrl)
                 }
             },
@@ -107,8 +92,7 @@ class PrivateBrowserActivity : ComponentActivity() {
 
         DisposableEffect(Unit) {
             onDispose {
-                // WHY: Explicit cleanup drops renderer/network references when
-                // the private Activity leaves the composition.
+                // WHY: Release private WebView resources with the composition.
             }
         }
     }
@@ -124,8 +108,7 @@ class PrivateBrowserActivity : ComponentActivity() {
 }
 
 private class PrivateBrowserController(private val context: android.content.Context) {
-    private val downloadManager =
-        context.getSystemService(DownloadManager::class.java)
+    private val downloadManager = context.getSystemService(DownloadManager::class.java)
 
     fun enqueueDownload(
         url: String,
@@ -133,7 +116,6 @@ private class PrivateBrowserController(private val context: android.content.Cont
         contentDisposition: String?,
         mimeType: String?
     ) {
-        if (url.isBlank()) return
         val uri = Uri.parse(url)
         if (uri.scheme != "http" && uri.scheme != "https") return
 
@@ -148,9 +130,7 @@ private class PrivateBrowserController(private val context: android.content.Cont
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
             setAllowedOverMetered(true)
             setAllowedOverRoaming(false)
-            userAgent?.takeIf(String::isNotBlank)?.let {
-                addRequestHeader("User-Agent", it)
-            }
+            userAgent?.takeIf(String::isNotBlank)?.let { addRequestHeader("User-Agent", it) }
         }
         downloadManager.enqueue(request)
     }
