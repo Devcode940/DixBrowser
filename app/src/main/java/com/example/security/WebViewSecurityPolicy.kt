@@ -13,12 +13,7 @@ import androidx.annotation.RequiresApi
 import java.util.Collections
 import java.util.WeakHashMap
 
-/**
- * Central security policy for all DixBrowser WebViews.
- *
- * WHY: WebView configuration is security-sensitive; keeping it in one place
- * prevents individual screens from accidentally weakening the browser.
- */
+/** Central security policy for all DixBrowser WebViews. */
 object WebViewSecurityPolicy {
     private val allowedHttpSchemes = setOf("http", "https")
     private val blockedSchemes = setOf(
@@ -36,8 +31,8 @@ object WebViewSecurityPolicy {
     ) {
         val settings = webView.settings
         settings.javaScriptEnabled = javaScriptEnabled
-        // WHY: DOM storage is required by many modern sites; private isolation
-        // comes from the dedicated WebView data directory, not from disabling it.
+        // WHY: DOM storage is required by modern sites; private isolation comes
+        // from the dedicated WebView data directory.
         settings.domStorageEnabled = true
         settings.databaseEnabled = false
         settings.allowFileAccess = false
@@ -82,8 +77,17 @@ object WebViewSecurityPolicy {
         return !httpsOnly || scheme == "https"
     }
 
-    /** Installs the navigation and Safe Browsing security boundary. */
-    fun installClient(webView: WebView, httpsOnly: Boolean) {
+    /**
+     * Installs navigation, Safe Browsing, and renderer-crash handling.
+     *
+     * WHY: Android requires a WebView whose renderer died to be discarded and
+     * recreated; reusing it can crash the host application.
+     */
+    fun installClient(
+        webView: WebView,
+        httpsOnly: Boolean,
+        onRendererGone: () -> Unit = {}
+    ) {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
@@ -99,6 +103,17 @@ object WebViewSecurityPolicy {
             ) {
                 callback.backToSafety(true)
             }
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: android.webkit.RenderProcessGoneDetail
+            ): Boolean {
+                // WHY: A dead renderer cannot safely be reused. Destroy this
+                // instance and let the browser layer create a replacement.
+                destroy(view)
+                onRendererGone()
+                return true
+            }
         }
     }
 
@@ -113,7 +128,7 @@ object WebViewSecurityPolicy {
     /** Releases a WebView without destroying the normal browser HTTP cache. */
     fun destroy(webView: WebView) {
         // WHY: Compose disposal and Activity teardown can both attempt cleanup;
-        // making destruction idempotent prevents double-destroy renderer crashes.
+        // idempotent destruction prevents double-destroy renderer crashes.
         synchronized(destroyedWebViews) {
             if (!destroyedWebViews.add(webView)) return
         }
