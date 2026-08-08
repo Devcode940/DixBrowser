@@ -13,7 +13,12 @@ class BrowserWebViewController(
     private val thirdPartyCookiesEnabled: Boolean,
     private val desktopUserAgent: String? = null
 ) {
-    fun configure(webView: WebView, incognito: Boolean) {
+    /** Configures a newly created WebView and installs security callbacks. */
+    fun configure(
+        webView: WebView,
+        incognito: Boolean,
+        onRendererGone: () -> Unit = {}
+    ) {
         WebViewSecurityPolicy.configure(
             webView = webView,
             incognito = incognito,
@@ -21,8 +26,9 @@ class BrowserWebViewController(
             allowThirdPartyCookies = thirdPartyCookiesEnabled,
             desktopUserAgent = desktopUserAgent
         )
-        WebViewSecurityPolicy.installClient(webView, httpsOnly)
+        WebViewSecurityPolicy.installClient(webView, httpsOnly, onRendererGone)
     }
 
+    /** Releases a WebView safely and idempotently. */
     fun destroy(webView: WebView) = WebViewSecurityPolicy.destroy(webView)
 }
