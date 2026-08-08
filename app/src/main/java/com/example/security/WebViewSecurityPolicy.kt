@@ -6,6 +6,7 @@ import android.webkit.CookieManager
 import android.webkit.SafeBrowsingResponse
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
@@ -31,7 +32,9 @@ object WebViewSecurityPolicy {
     ) {
         val settings = webView.settings
         settings.javaScriptEnabled = javaScriptEnabled
-        settings.domStorageEnabled = !incognito
+        // WHY: Private storage is isolated by the :private WebView data directory,
+        // so sites can still use normal session storage without sharing it with normal mode.
+        settings.domStorageEnabled = true
         settings.databaseEnabled = false
         settings.allowFileAccess = false
         settings.allowContentAccess = false
@@ -46,15 +49,20 @@ object WebViewSecurityPolicy {
         settings.builtInZoomControls = true
         settings.userAgentString = desktopUserAgent ?: WebSettings.getDefaultUserAgent(webView.context)
 
-        CookieManager.getInstance().setAcceptCookie(!incognito)
+        // WHY: Private mode allows session cookies for normal web compatibility,
+        // but third-party cookies remain disabled by default. The isolated data
+        // directory prevents these cookies from entering the normal profile.
+        CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(
             webView,
             !incognito && allowThirdPartyCookies
         )
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.safeBrowsingEnabled = true
+        }
+
         if (incognito) {
-            // WHY: Remove renderer-side navigation/cache/form state when a
-            // private WebView is explicitly discarded.
             webView.clearHistory()
             webView.clearCache(true)
             webView.clearFormData()
@@ -76,8 +84,6 @@ object WebViewSecurityPolicy {
                 view: WebView,
                 request: WebResourceRequest
             ): Boolean {
-                // WHY: Never let WebView silently navigate to custom schemes or
-                // local file/content resources.
                 return !isSafeNavigation(request.url, httpsOnly)
             }
 
@@ -88,10 +94,20 @@ object WebViewSecurityPolicy {
                 threatType: Int,
                 callback: SafeBrowsingResponse
             ) {
-                // WHY: A known malicious page must be rejected, not rendered.
                 callback.backToSafety(true)
             }
         }
+    }
+
+    /**
+     * Clears an isolated private WebView profile.
+     */
+    fun clearPrivateProfile() {
+        // WHY: This method is called only from the dedicated :private process,
+        // where these stores belong exclusively to the private profile.
+        runCatching { CookieManager.getInstance().removeAllCookies(null) }
+        runCatching { CookieManager.getInstance().flush() }
+        runCatching { WebStorage.getInstance().deleteAllData() }
     }
 
     fun destroy(webView: WebView) {
