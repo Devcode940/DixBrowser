@@ -1,6 +1,7 @@
 package com.example.security
 
 import android.net.Uri
+import android.os.Build
 import android.webkit.CookieManager
 import android.webkit.SafeBrowsingResponse
 import android.webkit.WebResourceRequest
@@ -8,13 +9,17 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
-import android.os.Build
 
-/** Central WebView hardening policy. Apply this to every browser WebView. */
+/**
+ * Central security policy for all DixBrowser WebViews.
+ *
+ * WHY: WebView configuration is security-sensitive; keeping it in one place
+ * prevents individual screens from accidentally weakening the browser.
+ */
 object WebViewSecurityPolicy {
     private val allowedHttpSchemes = setOf("http", "https")
     private val blockedSchemes = setOf(
-        "file", "content", "data", "javascript", "vbscript", "about"
+        "file", "content", "data", "javascript", "vbscript", "about", "blob"
     )
 
     fun configure(
@@ -42,12 +47,18 @@ object WebViewSecurityPolicy {
         settings.userAgentString = desktopUserAgent ?: WebSettings.getDefaultUserAgent(webView.context)
 
         CookieManager.getInstance().setAcceptCookie(!incognito)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, !incognito && allowThirdPartyCookies)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(
+            webView,
+            !incognito && allowThirdPartyCookies
+        )
 
         if (incognito) {
+            // WHY: Remove renderer-side navigation/cache/form state when a
+            // private WebView is explicitly discarded.
             webView.clearHistory()
             webView.clearCache(true)
             webView.clearFormData()
+            webView.clearSslPreferences()
         }
     }
 
@@ -55,31 +66,29 @@ object WebViewSecurityPolicy {
         val scheme = uri.scheme?.lowercase() ?: return false
         if (scheme in blockedSchemes) return false
         if (scheme !in allowedHttpSchemes) return false
-        return !httpsOnly || scheme == "https" || uri.host == null
+        if (uri.host.isNullOrBlank()) return false
+        return !httpsOnly || scheme == "https"
     }
 
     fun installClient(webView: WebView, httpsOnly: Boolean) {
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                val uri = request.url
-                return !isSafeNavigation(uri, httpsOnly)
-            }
-
-            override fun onReceivedError(
+            override fun shouldOverrideUrlLoading(
                 view: WebView,
-                request: WebResourceRequest,
-                error: android.webkit.WebResourceError
-            ) {
-                super.onReceivedError(view, request, error)
+                request: WebResourceRequest
+            ): Boolean {
+                // WHY: Never let WebView silently navigate to custom schemes or
+                // local file/content resources.
+                return !isSafeNavigation(request.url, httpsOnly)
             }
 
-            @RequiresApi(Build.VERSION_CODES.O)
+            @RequiresApi(Build.VERSION_CODES.O_MR1)
             override fun onSafeBrowsingHit(
                 view: WebView,
                 request: WebResourceRequest,
                 threatType: Int,
                 callback: SafeBrowsingResponse
             ) {
+                // WHY: A known malicious page must be rejected, not rendered.
                 callback.backToSafety(true)
             }
         }
@@ -90,6 +99,7 @@ object WebViewSecurityPolicy {
         webView.loadUrl("about:blank")
         webView.clearHistory()
         webView.clearCache(true)
+        webView.clearFormData()
         webView.removeAllViews()
         webView.webChromeClient = null
         webView.webViewClient = null
