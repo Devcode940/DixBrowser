@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,8 +58,15 @@ class PrivateBrowserActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        // WHY: The dedicated process owns this Chromium profile, so purge its
+        // cookies/storage when the private Activity is finally destroyed.
+        WebViewSecurityPolicy.clearPrivateProfile()
+        super.onDestroy()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
-    @androidx.compose.runtime.Composable
+    @Composable
     private fun PrivateWebView(initialUrl: String) {
         val session = remember { PrivateBrowsingSession() }
         val webViewHolder = remember { mutableStateOf<WebView?>(null) }
@@ -90,23 +98,19 @@ class PrivateBrowserActivity : ComponentActivity() {
                 }
             },
             update = { view ->
+                // WHY: WebView configuration is intentionally not repeated on every
+                // Compose recomposition; doing so would repeatedly clear private cache.
                 webViewHolder.value = view
-                WebViewSecurityPolicy.configure(
-                    webView = view,
-                    incognito = true,
-                    javaScriptEnabled = true,
-                    allowThirdPartyCookies = false
-                )
             },
             modifier = Modifier.fillMaxSize()
         )
 
         DisposableEffect(Unit) {
             onDispose {
-                // WHY: Closing private mode must destroy the renderer state and
-                // discard the isolated session rather than leaving it in memory.
+                // WHY: Closing private mode must destroy renderer state rather than
+                // leaving the isolated WebView alive in memory.
                 session.clear()
-                webViewHolder.value?.let { WebViewSecurityPolicy.destroy(it) }
+                webViewHolder.value?.let(WebViewSecurityPolicy::destroy)
                 webViewHolder.value = null
             }
         }
