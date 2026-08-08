@@ -1,9 +1,11 @@
 package com.example
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -11,15 +13,27 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.data.BookmarkRepository
 import com.example.data.BrowserDatabase
+import com.example.privatebrowser.PrivateBrowserActivity
+import com.example.security.WebViewRuntimeHardener
 import com.example.security.WebViewSecurityPolicy
 import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.launch
 
+/** Main browser Activity. */
 class MainActivity : ComponentActivity() {
     private val database by lazy { BrowserDatabase.getDatabase(this) }
     private val repository by lazy { BookmarkRepository(database.bookmarkDao()) }
@@ -42,10 +56,16 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val webViewLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
+        // WHY: BrowserScreen currently creates WebViews inside Compose. This
+        // observer hardens every instance as soon as it enters the view tree.
+        hardenWebViews()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Never expose WebView remote debugging in production builds.
+        // WHY: Never expose WebView remote debugging in production builds.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         CookieManager.getInstance().setAcceptFileSchemeCookies(false)
 
@@ -55,6 +75,13 @@ class MainActivity : ComponentActivity() {
         }
 
         enableEdgeToEdge()
+        window.decorView.viewTreeObserver.addOnGlobalLayoutListener(webViewLayoutListener)
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                settingsRepository.httpsOnlyMode.collect { hardenWebViews() }
+            }
+        }
 
         setContent {
             MyApplicationTheme {
@@ -62,22 +89,53 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    BrowserScreen(viewModel = viewModel)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        BrowserScreen(viewModel = viewModel)
+
+                        // WHY: The old in-screen incognito flag cannot provide
+                        // process-level WebView isolation. This entry point always
+                        // launches the genuine private browser Activity instead.
+                        FloatingActionButton(
+                            onClick = {
+                                startActivity(Intent(this@MainActivity, PrivateBrowserActivity::class.java))
+                            },
+                            modifier = Modifier.align(Alignment.BottomEnd)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = "Open private browser")
+                        }
+                    }
                 }
             }
         }
     }
 
     override fun onDestroy() {
-        // AndroidView does not automatically release WebView resources when a
-        // Compose hierarchy is torn down. Explicitly destroy every WebView in
-        // the activity tree to avoid renderer/memory leaks.
+        window.decorView.viewTreeObserver.removeOnGlobalLayoutListener(webViewLayoutListener)
         destroyWebViews(window.decorView)
         super.onDestroy()
     }
 
+    private fun hardenWebViews() {
+        val httpsOnly = settingsRepository.httpsOnlyMode.value
+        visitViews(window.decorView) { view ->
+            if (view is WebView) {
+                WebViewRuntimeHardener.harden(view, httpsOnly)
+            }
+        }
+    }
+
+    private fun visitViews(view: View, action: (View) -> Unit) {
+        action(view)
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                visitViews(view.getChildAt(index), action)
+            }
+        }
+    }
+
     private fun destroyWebViews(view: View) {
         if (view is WebView) {
+            WebViewRuntimeHardener.forget(view)
             runCatching { WebViewSecurityPolicy.destroy(view) }
             return
         }
