@@ -1,16 +1,11 @@
 package com.example.privatebrowser
 
 import android.annotation.SuppressLint
-import android.app.DownloadManager
-import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.view.ViewGroup
-import android.webkit.URLUtil
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,7 +20,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.security.PrivateBrowsingSession
 import com.example.security.PrivateWebViewProcess
 import com.example.security.WebViewSecurityPolicy
-import java.util.UUID
 
 /**
  * Dedicated private-browsing Activity running in the :private process.
@@ -35,7 +29,7 @@ import java.util.UUID
  */
 class PrivateBrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // WHY: setDataDirectorySuffix must happen before this process creates any WebView.
+        // WHY: setDataDirectorySuffix must happen before the first WebView in this process.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             super.onCreate(savedInstanceState)
             finish()
@@ -63,7 +57,6 @@ class PrivateBrowserActivity : ComponentActivity() {
     private fun PrivateWebView(initialUrl: String) {
         val session = remember { PrivateBrowsingSession() }
         val webViewHolder = remember { mutableStateOf<WebView?>(null) }
-        val controller = remember { PrivateBrowserController(applicationContext) }
 
         AndroidView(
             factory = { context ->
@@ -80,9 +73,12 @@ class PrivateBrowserActivity : ComponentActivity() {
                     )
                     WebViewSecurityPolicy.installClient(this, httpsOnly = true)
                     webChromeClient = WebChromeClient()
-                    setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                        controller.enqueueDownload(url, userAgent, contentDisposition, mimeType)
-                    }
+
+                    // WHY: DownloadManager creates persistent system download records
+                    // and files. Private mode therefore refuses downloads rather than
+                    // leaking private activity into durable shared storage.
+                    setDownloadListener { _, _, _, _, _ -> }
+
                     session.register(this)
                     webViewHolder.value = this
                     loadUrl(initialUrl)
@@ -90,7 +86,6 @@ class PrivateBrowserActivity : ComponentActivity() {
             },
             update = { view ->
                 webViewHolder.value = view
-                // WHY: Re-apply the immutable private profile policy after Compose updates.
                 WebViewSecurityPolicy.configure(
                     webView = view,
                     incognito = true,
@@ -103,8 +98,8 @@ class PrivateBrowserActivity : ComponentActivity() {
 
         DisposableEffect(Unit) {
             onDispose {
-                // WHY: Closing the private Activity must terminate the private renderer
-                // state instead of leaving cookies/cache/form data alive in the process.
+                // WHY: Closing private mode must destroy the renderer state and
+                // discard the isolated session rather than leaving it in memory.
                 session.clear()
                 webViewHolder.value?.let { WebViewSecurityPolicy.destroy(it) }
                 webViewHolder.value = null
@@ -130,34 +125,5 @@ class PrivateBrowserActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "com.example.privatebrowser.EXTRA_URL"
-    }
-}
-
-private class PrivateBrowserController(private val context: Context) {
-    private val downloadManager = context.getSystemService(DownloadManager::class.java)
-
-    fun enqueueDownload(
-        url: String,
-        userAgent: String?,
-        contentDisposition: String?,
-        mimeType: String?
-    ) {
-        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return
-        if (uri.scheme?.lowercase() !in setOf("http", "https")) return
-
-        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-            .ifBlank { "private-download-${UUID.randomUUID()}" }
-
-        val request = DownloadManager.Request(uri).apply {
-            setTitle(fileName)
-            setDescription("Private browsing download")
-            setMimeType(mimeType)
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-            setAllowedOverMetered(true)
-            setAllowedOverRoaming(false)
-            userAgent?.takeIf(String::isNotBlank)?.let { addRequestHeader("User-Agent", it) }
-        }
-        downloadManager.enqueue(request)
     }
 }
