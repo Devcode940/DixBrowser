@@ -29,6 +29,18 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Create ephemeral CI signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore ci-upload-key.jks \
+            -storepass android \
+            -keypass android \
+            -alias upload \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 1 \
+            -dname "CN=DixBrowser CI, OU=CI, O=DixBrowser, L=CI, ST=CI, C=US"
+
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
@@ -38,6 +50,6 @@ jobs:
       - name: Release build
         run: ./gradlew assembleRelease --stacktrace
         env:
-          KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          KEYSTORE_PATH: ${{ github.workspace }}/ci-upload-key.jks
           STORE_PASSWORD: android
           KEY_PASSWORD: android
