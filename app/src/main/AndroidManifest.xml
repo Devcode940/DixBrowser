@@ -31,12 +31,14 @@
             WHY: Android WebView storage is process-scoped when a data-directory
             suffix is used. Keeping private browsing in its own process prevents
             Chromium cookies/storage/cache from sharing the normal profile.
+            WHY: Excluding this Activity from recents prevents private URLs and
+            page previews from appearing in the system's recent-task UI.
         -->
         <activity
             android:name=".privatebrowser.PrivateBrowserActivity"
             android:exported="false"
             android:process=":private"
-            android:excludeFromRecents="false"
+            android:excludeFromRecents="true"
             android:launchMode="singleTop"
             android:label="Private Browser"
             android:theme="@style/Theme.MyApplication" />
