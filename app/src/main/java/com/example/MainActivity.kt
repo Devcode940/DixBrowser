@@ -2,7 +2,11 @@ package com.example
 
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
+import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,6 +17,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.example.data.BookmarkRepository
 import com.example.data.BrowserDatabase
+import com.example.security.WebViewSecurityPolicy
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -24,15 +29,26 @@ class MainActivity : ComponentActivity() {
     private val offlinePageRepository by lazy { com.example.data.OfflinePageRepository(database.offlinePageDao()) }
     private val passwordRepository by lazy { com.example.data.PasswordRepository(database.passwordCredentialDao()) }
     private val cookiePreferenceRepository by lazy { com.example.data.CookiePreferenceRepository(database.cookiePreferenceDao()) }
-    
+
     private val viewModel: BrowserViewModel by viewModels {
-        BrowserViewModelFactory(repository, historyRepository, savedTabRepository, settingsRepository, offlinePageRepository, passwordRepository, cookiePreferenceRepository)
+        BrowserViewModelFactory(
+            repository,
+            historyRepository,
+            savedTabRepository,
+            settingsRepository,
+            offlinePageRepository,
+            passwordRepository,
+            cookiePreferenceRepository
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // Auto display cutout / full notch screen support
+
+        // Never expose WebView remote debugging in production builds.
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        CookieManager.getInstance().setAcceptFileSchemeCookies(false)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -48,6 +64,26 @@ class MainActivity : ComponentActivity() {
                 ) {
                     BrowserScreen(viewModel = viewModel)
                 }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        // AndroidView does not automatically release WebView resources when a
+        // Compose hierarchy is torn down. Explicitly destroy every WebView in
+        // the activity tree to avoid renderer/memory leaks.
+        destroyWebViews(window.decorView)
+        super.onDestroy()
+    }
+
+    private fun destroyWebViews(view: View) {
+        if (view is WebView) {
+            runCatching { WebViewSecurityPolicy.destroy(view) }
+            return
+        }
+        if (view is ViewGroup) {
+            for (index in view.childCount - 1 downTo 0) {
+                destroyWebViews(view.getChildAt(index))
             }
         }
     }
